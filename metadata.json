@@ -1,0 +1,6 @@
+{
+  "name": "MandiBol",
+  "description": "Voice-first daily sales, stock, and net profit tracker for Indian vegetable sellers (sabzi mandi and street cart vendors).",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
