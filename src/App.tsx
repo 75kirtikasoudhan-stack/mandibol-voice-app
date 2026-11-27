@@ -617,7 +617,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-72 sm:pb-64">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-28 sm:pb-24">
       {/* Top Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-4">
@@ -646,7 +646,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 space-y-4 sm:space-y-5">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 pb-48 space-y-4 sm:space-y-5">
         {/* Top Summary Bar */}
         <SummaryCards
           totalKharid={state.totalKharid}
