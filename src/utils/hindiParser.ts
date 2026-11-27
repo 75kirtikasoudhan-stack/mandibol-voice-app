@@ -237,30 +237,30 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
 
   // Numeric grams (e.g., 500 gram, 250 gm, 500 ग्राम)
   const gramMatch = raw.match(
-    /(\d+(?:\.\d+)?)\s*(?:gram|grams|gm|g\b|ग्राम)(?=$|[\s,.?!])/i
+    /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:gram|grams|gm|g|ग्राम)(?=\s|$|[,.?!])/i
   );
   if (gramMatch) {
     const val = Number.parseFloat(gramMatch[1]);
     if (Number.isFinite(val) && val > 0) {
-      return { kg: Math.round((val / 1000) * 1000) / 1000, matchedSpan: gramMatch[0] };
+      return { kg: Math.round((val / 1000) * 1000) / 1000, matchedSpan: gramMatch[0].trim() };
     }
   }
 
   // Numeric kilos (e.g., 2 kilo, 10 kg, 2 किलो, 2 किलोमीटर)
   const kiloMatch = raw.match(
-    new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${KILO_UNIT_PATTERN}(?=$|[\\s,.?!])`, "i")
+    new RegExp(`(?:^|\\s)(\\d+(?:\\.\\d+)?)\\s*${KILO_UNIT_PATTERN}(?=\\s|$|[,.?!])`, "i")
   );
   if (kiloMatch) {
     const val = Number.parseFloat(kiloMatch[1]);
     if (Number.isFinite(val) && val > 0) {
-      return { kg: val, matchedSpan: kiloMatch[0] };
+      return { kg: val, matchedSpan: kiloMatch[0].trim() };
     }
   }
 
-  // Spoken Hindi number words before kilo/kg/किलो/किलोमीटर (avoid \b for Devanagari)
+  // Spoken Hindi number words before kilo/kg/किलो/किलोमीटर
   const wordKiloMatch = raw.match(
     new RegExp(
-      `(?:^|[\\s,])([a-zA-Z\\u0900-\\u097F]+)\\s+${KILO_UNIT_PATTERN}(?=$|[\\s,.?!])`,
+      `(?:^|\\s)([a-zA-Z\\u0900-\\u097F]+)\\s+${KILO_UNIT_PATTERN}(?=\\s|$|[,.?!])`,
       "i"
     )
   );
@@ -268,7 +268,7 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
     const word = wordKiloMatch[1].toLowerCase();
     const mapped = HINDI_NUMBER_WORDS[word];
     if (mapped) {
-      return { kg: mapped, matchedSpan: wordKiloMatch[0] };
+      return { kg: mapped, matchedSpan: wordKiloMatch[0].trim() };
     }
   }
 
@@ -277,14 +277,14 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
 
 function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
   // Prefer explicit currency markers
-  const prefixMatch = raw.match(/(?:rs\.?|₹)\s*(\d+(?:\.\d+)?)/i);
+  const prefixMatch = raw.match(/(?:^|\s)(?:rs\.?|₹)\s*(\d+(?:\.\d+)?)(?=\s|$|[,.?!])/i);
   if (prefixMatch) {
     const val = Number.parseFloat(prefixMatch[1]);
     if (Number.isFinite(val) && val > 0) return Math.round(val);
   }
 
   const suffixMatch = raw.match(
-    /(\d+(?:\.\d+)?)\s*(?:rupaye|rupees|rupee|rupaiye|rs\.?|₹|रुपये|रुपए|रुपया|रु\.?)/i
+    /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:rupaye|rupees|rupee|rupaiye|rs\.?|₹|रुपए|रुपये|रुपया|रु\.?)(?=\s|$|[,.?!])/i
   );
   if (suffixMatch) {
     const val = Number.parseFloat(suffixMatch[1]);
@@ -296,25 +296,25 @@ function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
 
   // Check "<number> mein/ka/ke"
   const contextNumMatch = withoutQty.match(
-    /(\d+(?:\.\d+)?)\s*(?:mein|me|ka|ke|में|का|के)(?=$|[\s,.?!])/i
+    /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:mein|me|ka|ke|में|का|के)(?=\s|$|[,.?!])/i
   );
   if (contextNumMatch) {
     const val = Number.parseFloat(contextNumMatch[1]);
     if (Number.isFinite(val) && val > 0) return Math.round(val);
   }
 
-  // Check compound Hindi hundreds (e.g., "दो सौ रुपये", "teen sau rupaye")
+  // Check compound Hindi hundreds (e.g., "दो सौ रुपए", "teen sau rupaye")
   const hundredMatch = withoutQty.match(
-    /(?:^|[\s,])([a-zA-Z\u0900-\u097F]+)\s+(?:sau|सौ)\s*(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपये|रुपए|रुपया|में|mein)?/i
+    /(?:^|\s)([a-zA-Z\u0900-\u097F]+)\s+(?:sau|सौ)(?:\s+(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपए|रुपये|रुपया|में|mein))?(?=\s|$|[,.?!])/i
   );
   if (hundredMatch) {
     const mult = HINDI_NUMBER_WORDS[hundredMatch[1].toLowerCase()];
     if (mult) return mult * 100;
   }
 
-  // Check single Hindi word price before rupaye (e.g., "sau rupaye", "पचास रुपये")
+  // Check single Hindi word price before rupaye (e.g., "sau rupaye", "पचास रुपए")
   const wordPriceMatch = withoutQty.match(
-    /(?:^|[\s,])([a-zA-Z\u0900-\u097F]+)\s+(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपये|रुपए|रुपया)/i
+    /(?:^|\s)([a-zA-Z\u0900-\u097F]+)\s+(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपए|रुपये|रुपया)(?=\s|$|[,.?!])/i
   );
   if (wordPriceMatch) {
     const mapped = HINDI_NUMBER_WORDS[wordPriceMatch[1].toLowerCase()];
