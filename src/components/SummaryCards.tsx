@@ -3,9 +3,16 @@ import { IndianRupee, ShoppingBag, TrendingUp } from "lucide-react";
 interface SummaryCardsProps {
   totalKharid: number;
   totalBikri: number;
+  totalOnlineBikri: number;
+  totalOfflineBikri: number;
 }
 
-export function SummaryCards({ totalKharid, totalBikri }: SummaryCardsProps) {
+export function SummaryCards({
+  totalKharid,
+  totalBikri,
+  totalOnlineBikri,
+  totalOfflineBikri,
+}: SummaryCardsProps) {
   const munafa = totalBikri - totalKharid;
   const isNegative = munafa < 0;
   const formattedMunafa = `${isNegative ? "-" : "+"}₹${Math.abs(munafa).toLocaleString("en-IN")}`;
@@ -32,7 +39,7 @@ export function SummaryCards({ totalKharid, totalBikri }: SummaryCardsProps) {
         </div>
       </div>
 
-      {/* Bikri (Sales) - Blue */}
+      {/* Bikri (Sales) - Blue with Offline Cash & Online UPI Split */}
       <div className="rounded-2xl bg-blue-50 border-2 border-blue-300 p-2.5 sm:p-4 flex flex-col justify-between">
         <div className="flex items-center justify-between gap-1">
           <span className="text-[11px] sm:text-xs font-bold text-blue-800">
@@ -49,6 +56,14 @@ export function SummaryCards({ totalKharid, totalBikri }: SummaryCardsProps) {
           <p className="font-mono-num text-lg sm:text-3xl font-extrabold text-blue-950 tracking-tight mt-0.5 truncate">
             ₹{totalBikri.toLocaleString("en-IN")}
           </p>
+          <div className="mt-1.5 pt-1.5 border-t border-blue-200/80 space-y-0.5 text-[10px] sm:text-xs font-mono-num font-bold text-blue-900">
+            <p className="truncate">
+              💵 Offline (Cash): ₹{totalOfflineBikri.toLocaleString("en-IN")}
+            </p>
+            <p className="truncate">
+              📱 Online (UPI): ₹{totalOnlineBikri.toLocaleString("en-IN")}
+            </p>
+          </div>
         </div>
       </div>
 

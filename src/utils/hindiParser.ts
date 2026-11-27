@@ -1,12 +1,25 @@
 import { VEGETABLE_CATALOG } from "../data/initialData";
-import type { ParsedVoiceCommand } from "../types";
+import type {
+  LedgerAccountType,
+  ParsedMultiOrderLine,
+  ParsedVoiceCommand,
+  PaymentMode,
+} from "../types";
 
 export interface ParserContext {
   totalKharid: number;
   totalBikri: number;
   munafa: number;
-  stocks: Array<{ name: string; remainingKg: number }>;
+  stocks: Array<{
+    name: string;
+    remainingKg: number;
+    boughtKg?: number;
+    boughtCostInr?: number;
+    soldKg?: number;
+    soldRevenueInr?: number;
+  }>;
   udhaarCustomers: string[];
+  udhaarPeople?: Array<{ name: string; accountType: LedgerAccountType }>;
 }
 
 const VEG_ALIASES: Array<{ patterns: RegExp[]; canonical: string }> = [
@@ -113,6 +126,10 @@ const NON_VEG_CAPITALIZED_WORDS = new Set([
   "Adha",
   "Dedh",
   "Dhai",
+  "Prati",
+  "Per",
+  "Hisab",
+  "Hisaab",
   "Rupaye",
   "Rupees",
   "Rupee",
@@ -134,12 +151,17 @@ const NON_VEG_CAPITALIZED_WORDS = new Set([
   "Khata",
   "Baaki",
   "Baki",
+  "Jama",
+  "Kiya",
+  "Kiye",
+  "Chukaya",
+  "Diye",
+  "Kat",
+  "Kaat",
   "Munafa",
   "Bacha",
   "Maal",
   "Batao",
-  "Hisab",
-  "Hisaab",
   "Total",
   "Kul",
   "Aur",
@@ -148,12 +170,163 @@ const NON_VEG_CAPITALIZED_WORDS = new Set([
   "Ki",
   "Se",
   "Ko",
+  "Ne",
   "Ji",
   "Bhai",
+  "Kisan",
+  "Mandal",
+  "Mobile",
+  "Phone",
+  "Number",
+  "Address",
+  "Pata",
+  "Sector",
+  "Gate",
+  "Market",
+  "Road",
+  "Nagar",
+  "Colony",
+  "Dene",
+  "Dena",
+  "Hain",
+  "Hai",
+  "Online",
+  "Upi",
+  "Phonepe",
+  "Gpay",
+  "Paytm",
+  "Offline",
+  "Cash",
+  "Nakad",
+  "Nagad",
+  "Diya",
 ]);
 
 const KILO_UNIT_PATTERN =
   "(?:kilo|kilos|kilogram|kilograms|kilometer|kilometers|kg|kgs|किलोमीटर|किलोग्राम|किलो)";
+
+const CURRENCY_WORD_PATTERN =
+  "(?:rupaye|rupees|rupee|rupaiye|rs\\.?|₹|रुपए|रुपये|रुपया|रु\\.?)";
+
+const ONLINE_MODE_PATTERN =
+  "(?:online|upi|phone\\s?pe|g\\s?pay|google\\s?pay|paytm|ऑनलाइन|यूपीआई|फोनपे|गूगल\\s*पे|पेटीएम)";
+
+const OFFLINE_MODE_PATTERN =
+  "(?:offline|cash|nakad|nagad|नकद|कैश|ऑफलाइन|हाथोंहाथ)";
+
+interface PaymentSplitResult {
+  explicitOnlineInr: number;
+  explicitOfflineInr: number;
+  hasOnlineKeyword: boolean;
+  hasOfflineKeyword: boolean;
+  textWithoutSplits: string;
+}
+
+function extractPaymentSplit(raw: string): PaymentSplitResult {
+  let working = raw;
+  let explicitOnlineInr = 0;
+  let explicitOfflineInr = 0;
+
+  const patterns: Array<{ re: RegExp; target: "online" | "offline" }> = [
+    {
+      re: new RegExp(
+        `(?:^|\\s)(?:rs\\.?|₹)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:${CURRENCY_WORD_PATTERN})?\\s*(?:ka|ke|mein|me|se|का|के|में|से)?\\s*${ONLINE_MODE_PATTERN}(?=\\s|$|[,.?!])`,
+        "gi"
+      ),
+      target: "online",
+    },
+    {
+      re: new RegExp(
+        `(?:^|\\s)${ONLINE_MODE_PATTERN}\\s*(?::|-|se|mein|me|से|में)?\\s*(?:rs\\.?|₹)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:${CURRENCY_WORD_PATTERN})?(?=\\s|$|[,.?!])`,
+        "gi"
+      ),
+      target: "online",
+    },
+    {
+      re: new RegExp(
+        `(?:^|\\s)(?:rs\\.?|₹)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:${CURRENCY_WORD_PATTERN})?\\s*(?:ka|ke|mein|me|se|का|के|में|से)?\\s*${OFFLINE_MODE_PATTERN}(?=\\s|$|[,.?!])`,
+        "gi"
+      ),
+      target: "offline",
+    },
+    {
+      re: new RegExp(
+        `(?:^|\\s)${OFFLINE_MODE_PATTERN}\\s*(?::|-|se|mein|me|से|में)?\\s*(?:rs\\.?|₹)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:${CURRENCY_WORD_PATTERN})?(?=\\s|$|[,.?!])`,
+        "gi"
+      ),
+      target: "offline",
+    },
+  ];
+
+  for (const { re, target } of patterns) {
+    working = working.replace(re, (fullMatch, numStr: string) => {
+      const val = Number.parseFloat(numStr);
+      if (Number.isFinite(val) && val > 0) {
+        if (target === "online") {
+          explicitOnlineInr += Math.round(val);
+        } else {
+          explicitOfflineInr += Math.round(val);
+        }
+        return " ";
+      }
+      return fullMatch;
+    });
+  }
+
+  const hasOnlineKeyword = new RegExp(
+    `(?:^|\\s|[,.?!])${ONLINE_MODE_PATTERN}(?=\\s|$|[,.?!])`,
+    "i"
+  ).test(raw);
+  const hasOfflineKeyword = new RegExp(
+    `(?:^|\\s|[,.?!])${OFFLINE_MODE_PATTERN}(?=\\s|$|[,.?!])`,
+    "i"
+  ).test(raw);
+
+  return {
+    explicitOnlineInr,
+    explicitOfflineInr,
+    hasOnlineKeyword,
+    hasOfflineKeyword,
+    textWithoutSplits: working.replace(/\s+/g, " ").trim(),
+  };
+}
+
+function resolvePaymentAmounts(
+  totalAmountInr: number,
+  split: PaymentSplitResult
+): {
+  paid_online_inr: number;
+  paid_offline_inr: number;
+  payment_mode: PaymentMode;
+} {
+  if (split.explicitOnlineInr > 0 || split.explicitOfflineInr > 0) {
+    const mode: PaymentMode =
+      split.explicitOnlineInr > 0 && split.explicitOfflineInr > 0
+        ? "SPLIT"
+        : split.explicitOnlineInr > 0
+        ? "ONLINE"
+        : "OFFLINE";
+    return {
+      paid_online_inr: split.explicitOnlineInr,
+      paid_offline_inr: split.explicitOfflineInr,
+      payment_mode: mode,
+    };
+  }
+
+  if (split.hasOnlineKeyword && !split.hasOfflineKeyword) {
+    return {
+      paid_online_inr: Math.max(0, totalAmountInr),
+      paid_offline_inr: 0,
+      payment_mode: "ONLINE",
+    };
+  }
+
+  return {
+    paid_online_inr: 0,
+    paid_offline_inr: Math.max(0, totalAmountInr),
+    payment_mode: "OFFLINE",
+  };
+}
 
 function normalizeDevanagariDigits(text: string): string {
   const devDigits = "०१२३४५६७८९";
@@ -166,7 +339,6 @@ function normalizeDevanagariDigits(text: string): string {
 function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
   const lower = raw.toLowerCase();
 
-  // Compound fractions first
   if (/\bpaune\s+do\b/i.test(lower) || /पौने\s+दो/.test(raw)) {
     return { kg: 1.75, matchedSpan: "paune do" };
   }
@@ -177,7 +349,6 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
     return { kg: 3.5, matchedSpan: "saade teen" };
   }
 
-  // Standard Indian unit words (Latin + Devanagari)
   const paavMatch = raw.match(
     /(?:\b(?:ek\s+)?(?:paav|pav|pao)(?:\s+bhar)?\b|एक\s+पाव|पाव\s+भर|पाव)/i
   );
@@ -235,7 +406,6 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
     return { kg: 2.5, matchedSpan: dhaiMatch[0] };
   }
 
-  // Numeric grams (e.g., 500 gram, 250 gm, 500 ग्राम)
   const gramMatch = raw.match(
     /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:gram|grams|gm|g|ग्राम)(?=\s|$|[,.?!])/i
   );
@@ -246,7 +416,6 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
     }
   }
 
-  // Numeric kilos (e.g., 2 kilo, 10 kg, 2 किलो, 2 किलोमीटर)
   const kiloMatch = raw.match(
     new RegExp(`(?:^|\\s)(\\d+(?:\\.\\d+)?)\\s*${KILO_UNIT_PATTERN}(?=\\s|$|[,.?!])`, "i")
   );
@@ -257,7 +426,6 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
     }
   }
 
-  // Spoken Hindi number words before kilo/kg/किलो/किलोमीटर
   const wordKiloMatch = raw.match(
     new RegExp(
       `(?:^|\\s)([a-zA-Z\\u0900-\\u097F]+)\\s+${KILO_UNIT_PATTERN}(?=\\s|$|[,.?!])`,
@@ -275,8 +443,54 @@ function extractQuantityKg(raw: string): { kg: number; matchedSpan: string } {
   return { kg: 0, matchedSpan: "" };
 }
 
+function extractRatePerKg(raw: string, qtyMatchedSpan: string): number {
+  const withoutQty = qtyMatchedSpan ? raw.replace(qtyMatchedSpan, " ") : raw;
+
+  const prefixRateMatch = withoutQty.match(
+    /(?:^|\s)(?:rs\.?|₹)\s*(\d+(?:\.\d+)?)\s*(?:\/\s*(?:kg|kilo|किलो)|per\s+(?:kg|kilo)|prati\s+(?:kg|kilo|किलो)|प्रति\s+(?:किलो|किलोग्राम)|(?:kg|kilo|किलो))(?=\s|$|[,.?!])/i
+  );
+  if (prefixRateMatch) {
+    const val = Number.parseFloat(prefixRateMatch[1]);
+    if (Number.isFinite(val) && val > 0) return Math.round(val);
+  }
+
+  const explicitPerKgMatch = withoutQty.match(
+    new RegExp(
+      `(?:^|\\s)(\\d+(?:\\.\\d+)?)\\s*(?:${CURRENCY_WORD_PATTERN})?\\s*(?:\\/\\s*(?:kg|kilo|किलो)|per\\s+(?:kg|kilo)|prati\\s+(?:kg|kilo|किलो)|प्रति\\s+(?:किलो|किलोग्राम))(?=\\s|$|[,.?!])`,
+      "i"
+    )
+  );
+  if (explicitPerKgMatch) {
+    const val = Number.parseFloat(explicitPerKgMatch[1]);
+    if (Number.isFinite(val) && val > 0) return Math.round(val);
+  }
+
+  const currencyKiloMatch = withoutQty.match(
+    new RegExp(
+      `(?:^|\\s)(\\d+(?:\\.\\d+)?)\\s*${CURRENCY_WORD_PATTERN}\\s*(?:kilo|kg|किलो)(?=\\s|$|[,.?!])`,
+      "i"
+    )
+  );
+  if (currencyKiloMatch) {
+    const val = Number.parseFloat(currencyKiloMatch[1]);
+    if (Number.isFinite(val) && val > 0) return Math.round(val);
+  }
+
+  const wordRateMatch = withoutQty.match(
+    new RegExp(
+      `(?:^|\\s)([a-zA-Z\\u0900-\\u097F]+)\\s+${CURRENCY_WORD_PATTERN}\\s*(?:per\\s+(?:kg|kilo)|prati\\s+(?:kg|kilo|किलो)|प्रति\\s+(?:किलो|किलोग्राम)|kilo|kg|किलो)(?=\\s|$|[,.?!])`,
+      "i"
+    )
+  );
+  if (wordRateMatch) {
+    const mapped = HINDI_NUMBER_WORDS[wordRateMatch[1].toLowerCase()];
+    if (mapped) return mapped;
+  }
+
+  return 0;
+}
+
 function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
-  // Prefer explicit currency markers
   const prefixMatch = raw.match(/(?:^|\s)(?:rs\.?|₹)\s*(\d+(?:\.\d+)?)(?=\s|$|[,.?!])/i);
   if (prefixMatch) {
     const val = Number.parseFloat(prefixMatch[1]);
@@ -284,17 +498,15 @@ function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
   }
 
   const suffixMatch = raw.match(
-    /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:rupaye|rupees|rupee|rupaiye|rs\.?|₹|रुपए|रुपये|रुपया|रु\.?)(?=\s|$|[,.?!])/i
+    new RegExp(`(?:^|\\s)(\\d+(?:\\.\\d+)?)\\s*${CURRENCY_WORD_PATTERN}(?=\\s|$|[,.?!])`, "i")
   );
   if (suffixMatch) {
     const val = Number.parseFloat(suffixMatch[1]);
     if (Number.isFinite(val) && val > 0) return Math.round(val);
   }
 
-  // Remove quantity span so we don't accidentally treat kg number as ₹
   const withoutQty = qtyMatchedSpan ? raw.replace(qtyMatchedSpan, " ") : raw;
 
-  // Check "<number> mein/ka/ke"
   const contextNumMatch = withoutQty.match(
     /(?:^|\s)(\d+(?:\.\d+)?)\s*(?:mein|me|ka|ke|में|का|के)(?=\s|$|[,.?!])/i
   );
@@ -303,25 +515,28 @@ function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
     if (Number.isFinite(val) && val > 0) return Math.round(val);
   }
 
-  // Check compound Hindi hundreds (e.g., "दो सौ रुपए", "teen sau rupaye")
   const hundredMatch = withoutQty.match(
-    /(?:^|\s)([a-zA-Z\u0900-\u097F]+)\s+(?:sau|सौ)(?:\s+(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपए|रुपये|रुपया|में|mein))?(?=\s|$|[,.?!])/i
+    new RegExp(
+      `(?:^|\\s)([a-zA-Z\\u0900-\\u097F]+)\\s+(?:sau|सौ)(?:\\s+(?:${CURRENCY_WORD_PATTERN}|में|mein))?(?=\\s|$|[,.?!])`,
+      "i"
+    )
   );
   if (hundredMatch) {
     const mult = HINDI_NUMBER_WORDS[hundredMatch[1].toLowerCase()];
     if (mult) return mult * 100;
   }
 
-  // Check single Hindi word price before rupaye (e.g., "sau rupaye", "पचास रुपए")
   const wordPriceMatch = withoutQty.match(
-    /(?:^|\s)([a-zA-Z\u0900-\u097F]+)\s+(?:rupaye|rupees|rupee|rupaiye|rs\.?|रुपए|रुपये|रुपया)(?=\s|$|[,.?!])/i
+    new RegExp(
+      `(?:^|\\s)([a-zA-Z\\u0900-\\u097F]+)\\s+${CURRENCY_WORD_PATTERN}(?=\\s|$|[,.?!])`,
+      "i"
+    )
   );
   if (wordPriceMatch) {
     const mapped = HINDI_NUMBER_WORDS[wordPriceMatch[1].toLowerCase()];
     if (mapped) return mapped;
   }
 
-  // Last resort: standalone number remaining after removing quantity
   const standaloneNums = withoutQty.match(/\b\d+(?:\.\d+)?\b/g);
   if (standaloneNums && standaloneNums.length > 0) {
     const lastVal = Number.parseFloat(standaloneNums[standaloneNums.length - 1]);
@@ -331,20 +546,33 @@ function extractAmountInr(raw: string, qtyMatchedSpan: string): number {
   return 0;
 }
 
-function extractVegetableItem(raw: string): string {
+function extractKnownVegetable(raw: string): string {
   for (const entry of VEG_ALIASES) {
     if (entry.patterns.some((re) => re.test(raw))) {
       return entry.canonical;
     }
   }
+  return "";
+}
 
-  // Check any capitalized word spoken/typed that isn't a known non-vegetable filler
+function extractVegetableItem(raw: string, excludeCustomer = ""): string {
+  const known = extractKnownVegetable(raw);
+  if (known) return known;
+
+  const customerWords = new Set(
+    excludeCustomer
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+
   const words = raw.split(/[\s,]+/).map((w) => w.replace(/[^a-zA-Z]/g, ""));
   for (const word of words) {
     if (
       word.length >= 3 &&
       /^[A-Z][a-z]+$/.test(word) &&
-      !NON_VEG_CAPITALIZED_WORDS.has(word)
+      !NON_VEG_CAPITALIZED_WORDS.has(word) &&
+      !customerWords.has(word.toLowerCase())
     ) {
       return word;
     }
@@ -353,53 +581,212 @@ function extractVegetableItem(raw: string): string {
   return "";
 }
 
+function extractMobileAndAddress(raw: string): {
+  mobile: string;
+  address: string;
+  cleanedText: string;
+} {
+  let working = raw;
+  let mobile = "";
+  let address = "";
+
+  // Extract 10-digit Indian mobile number (with optional label mobile/phone/number/मोबाइल/फ़ोन/नंबर)
+  const labeledMobileMatch = working.match(
+    /(?:^|\s)(?:mobile|mob|phone|number|no\.?|मोबाइल|फोन|फ़ोन|नंबर)\s*(?:no\.?|number|नंबर|:|-)?\s*(?:\+?91[\s-]?)?(\d{10})(?=\s|$|[,.?!])/i
+  );
+  if (labeledMobileMatch) {
+    mobile = labeledMobileMatch[1];
+    working = working.replace(labeledMobileMatch[0], " ");
+  } else {
+    const bareMobileMatch = working.match(
+      /(?:^|\s)(?:\+?91[\s-]?)?([6-9]\d{9})(?=\s|$|[,.?!])/
+    );
+    if (bareMobileMatch) {
+      mobile = bareMobileMatch[1];
+      working = working.replace(bareMobileMatch[0], " ");
+    }
+  }
+
+  // Extract address after keyword address / pata / पता up to connector (ko/ne/ke/को/ने/के) or numeric amount
+  const addressMatch = working.match(
+    /(?:^|\s)(?:address|addr|pata|पता)\s*(?::|-)?\s*(.+?)(?=\s+(?:ko|ne|ke|ki|ka|udhaar|udhar|dene|dena|jama|लिखो|उधार|को|ने|के)\b|\s+\d+\s*(?:rupaye|rupees|rs|₹|रुपए|रुपये)|$)/i
+  );
+  if (addressMatch && addressMatch[1]) {
+    address = addressMatch[1].replace(/[,]+$/g, "").trim();
+    working = working.replace(addressMatch[0], " ");
+  }
+
+  return {
+    mobile,
+    address,
+    cleanedText: working.replace(/\s+/g, " ").trim(),
+  };
+}
+
 function extractCustomerName(raw: string, knownCustomers: string[]): string {
   const lower = raw.toLowerCase();
 
+  // 1. Exact full-name match first
   for (const existing of knownCustomers) {
-    const base = existing.toLowerCase().replace(/\s+(ji|bhai)$/i, "").trim();
-    if (
-      lower.includes(existing.toLowerCase()) ||
-      (base.length >= 3 && lower.includes(base))
-    ) {
+    if (lower.includes(existing.toLowerCase())) {
       return existing;
     }
   }
 
-  // Check Devanagari known customer aliases
+  // Exact multi-word Hindi customer aliases first
   for (const [devKey, canonical] of Object.entries(HINDI_CUSTOMER_ALIASES)) {
-    if (raw.includes(devKey)) {
+    if (devKey.includes(" ") && raw.includes(devKey)) {
       return canonical;
     }
   }
 
-  // Match pattern before ke / ka / ki / ko / udhaar
+  let extractedCandidate = "";
+
   const latinMatch = raw.match(
-    /^(.+?)\s+(?:ke|ka|ki|ko|udhaar|udhar|baaki|baki|likho)\b/i
+    /^(.+?)\s+(?:mobile|mob|phone|number|address|addr|pata|ne|ke|ka|ki|ko|udhaar|udhar|baaki|baki|jama|kat|kaat|likho|hisab|hisaab|dene|dena)\b/i
   );
   if (latinMatch && latinMatch[1]) {
-    const candidate = latinMatch[1].replace(/^(aaj|abhi)\s+/i, "").trim();
+    const candidate = latinMatch[1]
+      .replace(/^(aaj|abhi)\s+/i, "")
+      .replace(/\s+(?:mobile|mob|phone|address|pata).*$/i, "")
+      .trim();
     if (candidate && !/^\d+$/.test(candidate)) {
-      return candidate
+      extractedCandidate = candidate
         .split(/\s+/)
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
         .join(" ");
     }
   }
 
-  // Devanagari pattern before के / का / की / को / उधार
-  const devMatch = raw.match(/^(.+?)\s+(?:के|का|की|को|उधार|बाकी|लिखो)/);
-  if (devMatch && devMatch[1]) {
-    const candidate = devMatch[1].trim();
-    if (candidate) return candidate;
+  if (!extractedCandidate) {
+    const devMatch = raw.match(
+      /^(.+?)\s+(?:मोबाइल|पता|ने|के|का|की|को|उधार|बाकी|जमा|काट|लिखो|हिसाब|देने|देना)/
+    );
+    if (devMatch && devMatch[1]) {
+      const candidate = devMatch[1].trim();
+      if (candidate && !/^(आज|अभी|उधार)$/.test(candidate)) {
+        extractedCandidate = candidate;
+      }
+    }
   }
 
-  return "";
+  // Single-word Devanagari alias fallback only when candidate has no qualifier (e.g. "रमेश" vs "रमेश किसान")
+  for (const [devKey, canonical] of Object.entries(HINDI_CUSTOMER_ALIASES)) {
+    if (!devKey.includes(" ")) {
+      if (extractedCandidate === devKey || (!extractedCandidate && raw.includes(devKey))) {
+        return canonical;
+      }
+    }
+  }
+
+  // 2. Match base name (e.g. "Sunita" -> "Sunita Ji") ONLY if candidate has no conflicting qualifier
+  for (const existing of knownCustomers) {
+    const base = existing.toLowerCase().replace(/\s+(ji|bhai)$/i, "").trim();
+    if (base.length >= 3) {
+      if (
+        extractedCandidate &&
+        extractedCandidate.toLowerCase() === base
+      ) {
+        return existing;
+      }
+      if (!extractedCandidate && lower.includes(base)) {
+        return existing;
+      }
+    }
+  }
+
+  return extractedCandidate;
 }
 
 function getItemHindiLabel(canonicalItem: string): string {
   const catalogEntry = VEGETABLE_CATALOG[canonicalItem];
   return catalogEntry?.hindiName || canonicalItem;
+}
+
+function extractMultiOrderLines(raw: string): ParsedMultiOrderLine[] {
+  const tokenRegex = new RegExp(
+    `(?:^|\\s)(?:` +
+      `(\\d+(?:\\.\\d+)?)\\s*(gram|grams|gm|g|ग्राम|${KILO_UNIT_PATTERN})` +
+      `|(ek\\s+paav|paav|pav|pao|एक\\s+पाव|पाव)` +
+      `|(aadha|adha|half)(?:\\s*${KILO_UNIT_PATTERN})?|(आधा)(?:\\s*${KILO_UNIT_PATTERN})?` +
+      `|(dedh|derh)(?:\\s*${KILO_UNIT_PATTERN})?|(डेढ़)(?:\\s*${KILO_UNIT_PATTERN})?` +
+      `|(dhai|adhaai)(?:\\s*${KILO_UNIT_PATTERN})?|(ढाई)(?:\\s*${KILO_UNIT_PATTERN})?` +
+      `|(ek|do|teen|chaar|char|paanch|panch|das|bees|एक|दो|तीन|चार|पांच|पाँच|दस|बीस)\\s+${KILO_UNIT_PATTERN}` +
+      `)(?=\\s|$|[,.?!])`,
+    "gi"
+  );
+
+  const tokens: Array<{ start: number; end: number; qtyKg: number }> = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(raw)) !== null) {
+    let qtyKg = 0;
+    if (match[1] && match[2]) {
+      const num = Number.parseFloat(match[1]);
+      if (Number.isFinite(num) && num > 0) {
+        const unitLower = match[2].toLowerCase();
+        const isGram =
+          unitLower === "g" ||
+          unitLower === "gm" ||
+          unitLower === "gram" ||
+          unitLower === "grams" ||
+          match[2] === "ग्राम";
+        qtyKg = isGram ? Math.round((num / 1000) * 1000) / 1000 : num;
+      }
+    } else if (match[3]) {
+      qtyKg = 0.25;
+    } else if (match[4] || match[5]) {
+      qtyKg = 0.5;
+    } else if (match[6] || match[7]) {
+      qtyKg = 1.5;
+    } else if (match[8] || match[9]) {
+      qtyKg = 2.5;
+    } else if (match[10]) {
+      qtyKg = HINDI_NUMBER_WORDS[match[10].toLowerCase()] ?? 0;
+    }
+
+    if (qtyKg > 0) {
+      tokens.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        qtyKg,
+      });
+    }
+  }
+
+  if (tokens.length === 0) return [];
+
+  const lines: ParsedMultiOrderLine[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const sliceStart = tokens[i].end;
+    const sliceEnd = i + 1 < tokens.length ? tokens[i + 1].start : raw.length;
+    const segment = raw.slice(sliceStart, sliceEnd).trim();
+    if (!segment) continue;
+
+    const item = extractKnownVegetable(segment);
+    if (!item) continue;
+
+    const rate = extractRatePerKg(segment, "");
+    const explicitAmtMatch = segment.match(
+      new RegExp(
+        `(?:^|\\s)(?:(?:rs\\.?|₹)\\s*(\\d+(?:\\.\\d+)?)|(\\d+(?:\\.\\d+)?)\\s*${CURRENCY_WORD_PATTERN})(?=\\s|$|[,.?!])`,
+        "i"
+      )
+    );
+    const explicitAmt =
+      rate <= 0 && explicitAmtMatch
+        ? Math.round(Number.parseFloat(explicitAmtMatch[1] || explicitAmtMatch[2]))
+        : 0;
+
+    lines.push({
+      item,
+      quantity_kg: tokens[i].qtyKg,
+      ...(rate > 0 ? { rate_per_kg: rate } : {}),
+      ...(explicitAmt > 0 ? { amount_inr: explicitAmt } : {}),
+    });
+  }
+
+  return lines;
 }
 
 export function parseHindiCommand(
@@ -421,54 +808,344 @@ export function parseHindiCommand(
     };
   }
 
+  const { mobile, address, cleanedText } = extractMobileAndAddress(raw);
+  const splitInfo = extractPaymentSplit(cleanedText);
+  const amountParseText = splitInfo.textWithoutSplits || cleanedText;
+  const cleanedLower = cleanedText.toLowerCase();
+
+  const { kg: quantity_kg, matchedSpan } = extractQuantityKg(amountParseText);
+  const rate_per_kg = extractRatePerKg(amountParseText, matchedSpan);
+  const rawExtractedTotal = extractAmountInr(amountParseText, matchedSpan);
+  const splitSum = splitInfo.explicitOnlineInr + splitInfo.explicitOfflineInr;
+  const extractedTotal = rawExtractedTotal > 0 ? rawExtractedTotal : splitSum;
+
   const isPurchase =
     /\b(kharida|kharid|khareeda|khareed|liya|laya|laaya|lae|buy|bought)\b/i.test(
-      lower
-    ) || /(खरीदा|ख़रीदा|खरीद|ख़रीद|लिया|लाया|लाए)/.test(raw);
+      cleanedLower
+    ) || /(खरीदा|ख़रीदा|खरीद|ख़रीद|लिया|लाया|लाए)/.test(cleanedText);
 
   const isSale =
-    /\b(bika|becha|bech|diya|bikri|bikree|sale|sold)\b/i.test(lower) ||
-    /(बिका|बेचा|बेच|दिया|बिक्री)/.test(raw);
+    /\b(bika|becha|bech|bikri|bikree|sale|sold)\b/i.test(cleanedLower) ||
+    /(बिका|बेचा|बेच|बिक्री)/.test(cleanedText);
 
-  const isUdhaar =
-    /\b(udhaar|udhar|likho|likh|khata|baaki|baki|credit)\b/i.test(lower) ||
-    /(उधार|लिखो|लिख|खाता|बाकी|बकाया)/.test(raw);
+  const isPayableAdd =
+    /\b(dene\s+hain|dene\s+hai|dena\s+hai|dene\s+h|dena\s+h|payable)\b/i.test(
+      cleanedLower
+    ) || /(देने\s*हैं|देने\s*है|देना\s*है)/.test(cleanedText);
 
-  // 1. Check SUMMARY intent
-  const hasExplicitSummaryWord =
-    /\b(munafa|profit|bacha|hisab|hisaab|batao|haal)\b/i.test(lower) ||
-    /(मुनाफा|बचा|हिसाब|बताओ|फायदा)/.test(raw);
+  const hasKoPayee =
+    /\bko\b/i.test(cleanedLower) || /(?:^|\s|[^\u0900-\u097F])को(?=\s|$)/.test(cleanedText) || /\Sको\s/.test(cleanedText);
+  const hasNeOrKeCustomer =
+    /\b(ne|ke)\b/i.test(cleanedLower) || /(ने|के)/.test(cleanedText);
+
+  const isPaidVerb =
+    /\b(diye|de\s+diye|paid|chukaya|chuka|wapas|diya)\b/i.test(cleanedLower) ||
+    /(दिए|दे\s+दिए|दिया|चुकाया|चुका|वापस)/.test(cleanedText);
+
+  const isRepayment =
+    /\b(jama|kat\s*do|kaat\s*do|chukaya|chuka|wapas|diye|de\s+diye)\b/i.test(
+      cleanedLower
+    ) || /(जमा|काट\s*दो|काट|चुकाया|चुका|वापस|दिए|दे\s+दिए)/.test(cleanedText);
+
+  const isFullPayoff =
+    /\b(chukaya|chuka\s+diya|poora|pura|sab\s+de\s+diya|clear)\b/i.test(cleanedLower) ||
+    /(चुकाया|पूरा|सब\s+दे\s+दिया)/.test(cleanedText);
+
+  const isUdhaarWord =
+    /\b(udhaar|udhar|likho|likh|khata|baaki|baki|credit)\b/i.test(cleanedLower) ||
+    /(उधार|लिखो|लिख|खाता|बाकी|बकाया)/.test(cleanedText);
+
+  const hasHisabWord =
+    /\b(hisab|hisaab|baaki|baki|batao)\b/i.test(cleanedLower) ||
+    /(हिसाब|बाकी|बताओ)/.test(cleanedText);
+
+  const hasProfitOrStockWord =
+    /\b(munafa|profit|bacha|maal)\b/i.test(cleanedLower) ||
+    /(मुनाफा|बचा|माल|फायदा)/.test(cleanedText);
+
   const hasKulOrTotal =
-    /\b(total|kul)\b/i.test(lower) || /(कुल|टोटल)/.test(raw);
+    /\b(total|kul)\b/i.test(cleanedLower) || /(कुल|टोटल)/.test(cleanedText);
 
-  if (
-    hasExplicitSummaryWord ||
-    (hasKulOrTotal && !isPurchase && !isSale && !isUdhaar)
-  ) {
+  const knownPeopleNames =
+    context?.udhaarPeople?.map((p) => p.name) ?? context?.udhaarCustomers ?? [];
+  const detectedCustomer = extractCustomerName(raw, knownPeopleNames);
+  const matchedProfile = context?.udhaarPeople?.find(
+    (p) => p.name.toLowerCase() === detectedCustomer.toLowerCase()
+  );
+
+  const knownItem = extractKnownVegetable(cleanedText);
+  const item =
+    isRepayment || isUdhaarWord || isPayableAdd
+      ? knownItem
+      : extractVegetableItem(cleanedText, detectedCustomer);
+  const multiLines = extractMultiOrderLines(amountParseText);
+
+  // -1. Check MULTI_SALE ("Ram ko 20 kilo tamatar 30 kilo aaloo ... bika" or "Ram ko 500 rupaye ka tamatar bika, 300 online aur 200 offline diya")
+  const isSingleBuyerCustomerSale =
+    multiLines.length === 1 &&
+    Boolean(detectedCustomer) &&
+    hasKoPayee &&
+    (isSale || isUdhaarWord);
+
+  const isValueBasedCustomerSale =
+    !isPurchase &&
+    !isPayableAdd &&
+    isSale &&
+    Boolean(detectedCustomer) &&
+    Boolean(item) &&
+    multiLines.length === 0 &&
+    quantity_kg <= 0 &&
+    extractedTotal > 0;
+
+  if (isValueBasedCustomerSale) {
+    const buyerName = detectedCustomer || "Grahak";
+    const totalBill = extractedTotal;
+    const catalogSell = VEGETABLE_CATALOG[item]?.defaultSellRate ?? 35;
+    const effectiveRate = rate_per_kg > 0 ? rate_per_kg : catalogSell;
+    const estQty = Math.max(0.25, Math.round((totalBill / effectiveRate) * 100) / 100);
+    const resolvedSplit = isUdhaarWord
+      ? {
+          paid_online_inr: splitInfo.explicitOnlineInr,
+          paid_offline_inr: splitInfo.explicitOfflineInr,
+          payment_mode: (splitInfo.explicitOnlineInr > 0 && splitInfo.explicitOfflineInr > 0
+            ? "SPLIT"
+            : splitInfo.explicitOnlineInr > 0
+            ? "ONLINE"
+            : "OFFLINE") as PaymentMode,
+        }
+      : resolvePaymentAmounts(totalBill, splitInfo);
+    const totalPaid =
+      resolvedSplit.paid_online_inr + resolvedSplit.paid_offline_inr;
+    const hasPendingUdhaar = isUdhaarWord || totalPaid < totalBill;
+
     return {
-      intent: "SUMMARY",
-      item: "",
-      quantity_kg: 0,
-      amount_inr: 0,
-      customer_name: "",
-      hindi_reply: "आज का पूरा हिसाब और बचा हुआ माल बता रहा हूँ।",
+      intent: "MULTI_SALE",
+      item,
+      quantity_kg: estQty,
+      amount_inr: totalBill,
+      customer_name: buyerName,
+      multi_items: [
+        {
+          item,
+          quantity_kg: estQty,
+          rate_per_kg: effectiveRate,
+          amount_inr: totalBill,
+        },
+      ],
+      is_udhaar: hasPendingUdhaar,
+      paid_online_inr: resolvedSplit.paid_online_inr,
+      paid_offline_inr: resolvedSplit.paid_offline_inr,
+      payment_mode: resolvedSplit.payment_mode,
+      hindi_reply: `${buyerName} का ${item} का ${totalBill} रुपये का बिल दर्ज किया जा रहा है।`,
     };
   }
 
-  const { kg: quantity_kg, matchedSpan } = extractQuantityKg(raw);
-  const amount_inr = extractAmountInr(raw, matchedSpan);
+  if (
+    !isPurchase &&
+    !isPayableAdd &&
+    (isSale || isUdhaarWord || isPaidVerb) &&
+    (multiLines.length >= 2 || isSingleBuyerCustomerSale)
+  ) {
+    const buyerName = detectedCustomer || "Grahak";
+    if (
+      multiLines.length === 1 &&
+      !multiLines[0].rate_per_kg &&
+      !multiLines[0].amount_inr &&
+      extractedTotal > 0
+    ) {
+      multiLines[0].amount_inr = extractedTotal;
+    }
 
-  // 2. Check UDHAAR intent
-  if (isUdhaar) {
-    const customer_name = extractCustomerName(raw, context?.udhaarCustomers ?? []);
-    if (!customer_name || amount_inr <= 0) {
+    const explicitPaidTotal = splitInfo.explicitOnlineInr + splitInfo.explicitOfflineInr;
+    const hasExplicitSplit = explicitPaidTotal > 0;
+    const modeHint: PaymentMode | undefined = hasExplicitSplit
+      ? splitInfo.explicitOnlineInr > 0 && splitInfo.explicitOfflineInr > 0
+        ? "SPLIT"
+        : splitInfo.explicitOnlineInr > 0
+        ? "ONLINE"
+        : "OFFLINE"
+      : splitInfo.hasOnlineKeyword && !splitInfo.hasOfflineKeyword
+      ? "ONLINE"
+      : undefined;
+
+    return {
+      intent: "MULTI_SALE",
+      item: multiLines[0].item,
+      quantity_kg: multiLines.reduce((acc, l) => acc + l.quantity_kg, 0),
+      amount_inr: 0,
+      customer_name: buyerName,
+      multi_items: multiLines,
+      is_udhaar: isUdhaarWord,
+      ...(hasExplicitSplit
+        ? {
+            paid_online_inr: splitInfo.explicitOnlineInr,
+            paid_offline_inr: splitInfo.explicitOfflineInr,
+          }
+        : {}),
+      ...(modeHint ? { payment_mode: modeHint } : {}),
+      hindi_reply: `${buyerName} के लिए ${multiLines.length} सब्जियों का बिल बनाया जा रहा है।`,
+    };
+  }
+
+  // 0. Check PAYABLE_ADD ("Ramesh kisan ko 200 rupaye dene hain")
+  if (isPayableAdd && !knownItem) {
+    if (!detectedCustomer || extractedTotal <= 0) {
+      return {
+        intent: "UNCLEAR",
+        suggested_intent: "PAYABLE_ADD",
+        item: "",
+        quantity_kg: 0,
+        amount_inr: extractedTotal,
+        customer_name: detectedCustomer,
+        ...(mobile ? { mobile } : {}),
+        ...(address ? { address } : {}),
+        hindi_reply: "किसे कितने रुपये देने हैं? कृपया दोबारा बोलें या नीचे चुनें।",
+      };
+    }
+
+    return {
+      intent: "PAYABLE_ADD",
+      item: "",
+      quantity_kg: 0,
+      amount_inr: extractedTotal,
+      customer_name: detectedCustomer,
+      ...(mobile ? { mobile } : {}),
+      ...(address ? { address } : {}),
+      hindi_reply: `जी, ${detectedCustomer} को ${extractedTotal} रुपये देनदारी (Payable) में लिख दिए हैं।`,
+    };
+  }
+
+  // 1. Check PAYABLE_PAY vs UDHAAR_JAMA
+  // If user says "<person> ko <amt> rupaye diye" (or person is known PAYABLE and not "ne jama"), it is PAYABLE_PAY
+  const isPayablePayment =
+    !knownItem &&
+    !isUdhaarWord &&
+    ((hasKoPayee && isPaidVerb && !hasNeOrKeCustomer) ||
+      (matchedProfile?.accountType === "PAYABLE" &&
+        (isPaidVerb || isRepayment) &&
+        !hasNeOrKeCustomer));
+
+  if (isPayablePayment) {
+    const payTotal = splitSum > 0 ? splitSum : extractedTotal;
+    if (!detectedCustomer || (payTotal <= 0 && !isFullPayoff)) {
+      return {
+        intent: "UNCLEAR",
+        suggested_intent: "PAYABLE_PAY",
+        item: "",
+        quantity_kg: 0,
+        amount_inr: payTotal,
+        customer_name: detectedCustomer,
+        hindi_reply: "किसे कितने रुपये दिए? कृपया दोबारा बोलें या नीचे चुनें।",
+      };
+    }
+
+    const resolvedPay = resolvePaymentAmounts(payTotal, splitInfo);
+    return {
+      intent: "PAYABLE_PAY",
+      item: "",
+      quantity_kg: 0,
+      amount_inr: payTotal,
+      customer_name: detectedCustomer,
+      full_repayment: payTotal <= 0 && isFullPayoff,
+      paid_online_inr: resolvedPay.paid_online_inr,
+      paid_offline_inr: resolvedPay.paid_offline_inr,
+      payment_mode: resolvedPay.payment_mode,
+      hindi_reply:
+        payTotal > 0
+          ? `जी, ${detectedCustomer} को ${payTotal} रुपये का भुगतान दर्ज किया जा रहा है।`
+          : `जी, ${detectedCustomer} का पूरा बकाया चुकाया जा रहा है।`,
+    };
+  }
+
+  // 2. Check UDHAAR_JAMA (customer repayment) BEFORE SALE/UDHAAR
+  if (isRepayment && !knownItem) {
+    const jamaTotal = splitSum > 0 ? splitSum : extractedTotal;
+    if (!detectedCustomer || (jamaTotal <= 0 && !isFullPayoff)) {
+      return {
+        intent: "UNCLEAR",
+        suggested_intent: "UDHAAR_JAMA",
+        item: "",
+        quantity_kg: 0,
+        amount_inr: jamaTotal,
+        customer_name: detectedCustomer,
+        hindi_reply: "किस ग्राहक ने कितने रुपये जमा किए? कृपया दोबारा बोलें या नीचे चुनें।",
+      };
+    }
+
+    const resolvedJama = resolvePaymentAmounts(jamaTotal, splitInfo);
+    return {
+      intent: "UDHAAR_JAMA",
+      item: "",
+      quantity_kg: 0,
+      amount_inr: jamaTotal,
+      customer_name: detectedCustomer,
+      full_repayment: jamaTotal <= 0 && isFullPayoff,
+      paid_online_inr: resolvedJama.paid_online_inr,
+      paid_offline_inr: resolvedJama.paid_offline_inr,
+      payment_mode: resolvedJama.payment_mode,
+      hindi_reply:
+        jamaTotal > 0
+          ? `जी, ${detectedCustomer} के ${jamaTotal} रुपये जमा किए जा रहे हैं।`
+          : `जी, ${detectedCustomer} का पूरा उधार जमा किया जा रहा है।`,
+    };
+  }
+
+  // 3. Check UDHAAR_HISAB (customer credit history/balance query like "Sunita ji ka hisab batao")
+  if (
+    !isPurchase &&
+    !isSale &&
+    !hasProfitOrStockWord &&
+    extractedTotal <= 0 &&
+    (detectedCustomer || /उधार|udhaar|udhar|khata|खाता/i.test(raw)) &&
+    hasHisabWord &&
+    !/\b(likho|likh)\b|लिखो|लिख/.test(raw)
+  ) {
+    return {
+      intent: "UDHAAR_HISAB",
+      item: "",
+      quantity_kg: 0,
+      amount_inr: 0,
+      customer_name: detectedCustomer,
+      hindi_reply: detectedCustomer
+        ? `${detectedCustomer} का उधार हिसाब बता रहा हूँ।`
+        : "कुल उधार खाते का हिसाब बता रहा हूँ।",
+    };
+  }
+
+  // 4. Check SUMMARY intent (profit & stock summary)
+  const hasExplicitSummaryWord =
+    hasProfitOrStockWord ||
+    /\b(hisab|hisaab|batao|haal)\b/i.test(cleanedLower) ||
+    /(हिसाब|बताओ)/.test(cleanedText);
+
+  if (
+    hasExplicitSummaryWord ||
+    (hasKulOrTotal && !isPurchase && !isSale && !isUdhaarWord)
+  ) {
+    return {
+      intent: "SUMMARY",
+      item,
+      quantity_kg: 0,
+      amount_inr: 0,
+      customer_name: "",
+      hindi_reply: item
+        ? `${getItemHindiLabel(item)} का मुनाफा और हिसाब बता रहा हूँ।`
+        : "आज का पूरा हिसाब और बचा हुआ माल बता रहा हूँ।",
+    };
+  }
+
+  // 5. Check UDHAAR (new credit entry — also supports mobile & address)
+  if (isUdhaarWord) {
+    if (!detectedCustomer || extractedTotal <= 0) {
       return {
         intent: "UNCLEAR",
         suggested_intent: "UDHAAR",
         item: "",
         quantity_kg: 0,
-        amount_inr,
-        customer_name,
+        amount_inr: extractedTotal,
+        customer_name: detectedCustomer,
+        ...(mobile ? { mobile } : {}),
+        ...(address ? { address } : {}),
         hindi_reply: "कितने रुपये उधार लिखने हैं? कृपया दोबारा बोलें या नीचे चुनें।",
       };
     }
@@ -477,15 +1154,21 @@ export function parseHindiCommand(
       intent: "UDHAAR",
       item: "",
       quantity_kg: 0,
-      amount_inr,
-      customer_name,
-      hindi_reply: `जी, ${customer_name} के ${amount_inr} रुपये उधार खाते में लिख दिए हैं।`,
+      amount_inr: extractedTotal,
+      customer_name: detectedCustomer,
+      ...(mobile ? { mobile } : {}),
+      ...(address ? { address } : {}),
+      hindi_reply: `जी, ${detectedCustomer} के ${extractedTotal} रुपये उधार खाते में लिख दिए हैं।`,
     };
   }
 
-  // 3. Check PURCHASE & SALE intents
-  const item = extractVegetableItem(raw);
+  // Compute total amount from per-kg rate if detected and quantity > 0
+  const amount_inr =
+    rate_per_kg > 0 && quantity_kg > 0
+      ? Math.round(quantity_kg * rate_per_kg)
+      : extractedTotal;
 
+  // 6. Check PURCHASE & SALE intents
   if (isPurchase && !isSale) {
     if (!item || quantity_kg <= 0 || amount_inr <= 0) {
       return {
@@ -493,53 +1176,78 @@ export function parseHindiCommand(
         suggested_intent: "PURCHASE",
         item,
         quantity_kg,
+        ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
         amount_inr,
         customer_name: "",
-        hindi_reply: "कितने रुपये में बिका? कृपया दोबारा बोलें या नीचे चुनें।",
+        hindi_reply: "कितने रुपये में खरीदा? कृपया दोबारा बोलें या नीचे चुनें।",
       };
     }
 
     const itemHindi = getItemHindiLabel(item);
+    const hindiReply =
+      rate_per_kg > 0
+        ? `जी, ${quantity_kg} किलो ${itemHindi} ${rate_per_kg} रुपये प्रति किलो के हिसाब से ${amount_inr} रुपये में खरीद दर्ज की गई है।`
+        : `जी, ${quantity_kg} किलो ${itemHindi} ${amount_inr} रुपये में खरीद दर्ज कर दी गई है।`;
+
     return {
       intent: "PURCHASE",
       item,
       quantity_kg,
+      ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
       amount_inr,
       customer_name: "",
-      hindi_reply: `जी, ${quantity_kg} किलो ${itemHindi} ${amount_inr} रुपये में खरीद दर्ज कर दी गई है।`,
+      hindi_reply: hindiReply,
     };
   }
 
-  if (isSale) {
+  if (isSale || (isPaidVerb && knownItem)) {
     if (!item || quantity_kg <= 0 || amount_inr <= 0) {
       return {
         intent: "UNCLEAR",
         suggested_intent: "SALE",
         item,
         quantity_kg,
+        ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
         amount_inr,
         customer_name: "",
         hindi_reply: "कितने रुपये में बिका? कृपया दोबारा बोलें या नीचे चुनें।",
       };
     }
 
+    const resolvedSale = resolvePaymentAmounts(amount_inr, splitInfo);
+    const modeHindi =
+      resolvedSale.payment_mode === "ONLINE"
+        ? " (ऑनलाइन UPI)"
+        : resolvedSale.payment_mode === "SPLIT"
+        ? ` (${resolvedSale.paid_online_inr} ऑनलाइन, ${resolvedSale.paid_offline_inr} नकद)`
+        : "";
     const itemHindi = getItemHindiLabel(item);
+    const hindiReply =
+      rate_per_kg > 0
+        ? `जी, ${quantity_kg} किलो ${itemHindi} ${rate_per_kg} रुपये प्रति किलो के हिसाब से ${amount_inr} रुपये में बिका${modeHindi}।`
+        : `जी, ${quantity_kg} किलो ${itemHindi} ${amount_inr} रुपये में बिक्री दर्ज कर दी गई है${modeHindi}।`;
+
     return {
       intent: "SALE",
       item,
       quantity_kg,
+      ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
       amount_inr,
       customer_name: "",
-      hindi_reply: `जी, ${quantity_kg} किलो ${itemHindi} ${amount_inr} रुपये में बिक्री दर्ज कर दी गई है।`,
+      paid_online_inr: resolvedSale.paid_online_inr,
+      paid_offline_inr: resolvedSale.paid_offline_inr,
+      payment_mode: resolvedSale.payment_mode,
+      hindi_reply: hindiReply,
     };
   }
 
-  // 4. Fallback if neither keyword nor clear structure matched
+  // 7. Fallback if neither keyword nor clear structure matched
   return {
     intent: "UNCLEAR",
     suggested_intent: "SALE",
     item,
     quantity_kg,
+    ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
     amount_inr,
     customer_name: "",
     hindi_reply: "कितने रुपये में बिका? कृपया दोबारा बोलें या नीचे चुनें।",

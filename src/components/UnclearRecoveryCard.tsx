@@ -7,7 +7,13 @@ interface UnclearRecoveryCardProps {
   parsed: ParsedVoiceCommand;
   knownCustomers: string[];
   onConfirm: (resolved: {
-    intent: "PURCHASE" | "SALE" | "UDHAAR";
+    intent:
+      | "PURCHASE"
+      | "SALE"
+      | "UDHAAR"
+      | "UDHAAR_JAMA"
+      | "PAYABLE_ADD"
+      | "PAYABLE_PAY";
     item: string;
     quantity_kg: number;
     amount_inr: number;
@@ -33,9 +39,9 @@ export function UnclearRecoveryCard({
   onConfirm,
   onCancel,
 }: UnclearRecoveryCardProps) {
-  const [intent, setIntent] = useState<"PURCHASE" | "SALE" | "UDHAAR">(
-    parsed.suggested_intent ?? "SALE"
-  );
+  const [intent, setIntent] = useState<
+    "PURCHASE" | "SALE" | "UDHAAR" | "UDHAAR_JAMA" | "PAYABLE_ADD" | "PAYABLE_PAY"
+  >(parsed.suggested_intent ?? "SALE");
   const [item, setItem] = useState(parsed.item || "Tamatar");
   const [kg, setKg] = useState(parsed.quantity_kg > 0 ? String(parsed.quantity_kg) : "1");
   const [amount, setAmount] = useState(
@@ -56,13 +62,18 @@ export function UnclearRecoveryCard({
       return;
     }
 
-    if (intent === "UDHAAR") {
+    if (
+      intent === "UDHAAR" ||
+      intent === "UDHAAR_JAMA" ||
+      intent === "PAYABLE_ADD" ||
+      intent === "PAYABLE_PAY"
+    ) {
       if (!customerName.trim()) {
-        setFormError("Kripya grahak ka naam likhein.");
+        setFormError("Kripya vyakti ka naam likhein.");
         return;
       }
       onConfirm({
-        intent: "UDHAAR",
+        intent,
         item: "",
         quantity_kg: 0,
         amount_inr: numericAmount,
@@ -89,6 +100,12 @@ export function UnclearRecoveryCard({
       customer_name: "",
     });
   };
+
+  const isCustomerIntent =
+    intent === "UDHAAR" ||
+    intent === "UDHAAR_JAMA" ||
+    intent === "PAYABLE_ADD" ||
+    intent === "PAYABLE_PAY";
 
   return (
     <section
@@ -121,12 +138,15 @@ export function UnclearRecoveryCard({
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
         {/* Action Toggle */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-amber-200/70 rounded-xl">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 p-1 bg-amber-200/70 rounded-xl">
           {(
             [
               { id: "SALE", label: "Bikri · Sale" },
               { id: "PURCHASE", label: "Kharid · Buy" },
               { id: "UDHAAR", label: "Udhaar" },
+              { id: "UDHAAR_JAMA", label: "Jama · Paid" },
+              { id: "PAYABLE_ADD", label: "Dena Hai" },
+              { id: "PAYABLE_PAY", label: "Dena Diya" },
             ] as const
           ).map((tab) => (
             <button
@@ -136,7 +156,7 @@ export function UnclearRecoveryCard({
                 setIntent(tab.id);
                 setFormError("");
               }}
-              className={`min-h-[40px] rounded-lg text-xs sm:text-sm font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`min-h-[40px] px-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 intent === tab.id
                   ? "bg-slate-900 text-white shadow-xs"
                   : "text-amber-950 hover:bg-amber-100/70"
@@ -147,10 +167,10 @@ export function UnclearRecoveryCard({
           ))}
         </div>
 
-        {intent === "UDHAAR" ? (
+        {isCustomerIntent ? (
           <div>
             <label className="block text-xs font-bold text-amber-950 mb-1.5">
-              Customer Name · ग्राहक का नाम
+              Person Name · ग्राहक / किसान का नाम
             </label>
             <input
               type="text"

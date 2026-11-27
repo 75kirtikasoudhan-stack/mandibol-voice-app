@@ -32,6 +32,11 @@ export function StockList({ stocks }: StockListProps) {
             : 0;
         const isOut = item.remainingKg <= 0;
         const isLow = !isOut && (item.remainingKg <= 3 || pctRemaining <= 20);
+        const avgCostPerKg =
+          item.boughtKg > 0 ? item.boughtCostInr / item.boughtKg : 0;
+        const itemProfit = Math.round(
+          item.soldRevenueInr - item.soldKg * avgCostPerKg
+        );
 
         return (
           <div
@@ -68,12 +73,32 @@ export function StockList({ stocks }: StockListProps) {
                     <span className="tabular-nums">
                       Bought {formatKg(item.boughtKg)} kg for ₹{item.boughtCostInr.toLocaleString("en-IN")}
                     </span>
+                    {avgCostPerKg > 0 && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="tabular-nums font-semibold text-slate-700">
+                          Avg ₹{Math.round(avgCostPerKg)}/kg
+                        </span>
+                      </>
+                    )}
                     {item.soldKg > 0 && (
                       <>
                         <span aria-hidden="true">·</span>
                         <span className="tabular-nums text-blue-700 font-semibold">
-                          Sold {formatKg(item.soldKg)} kg
+                          Sold {formatKg(item.soldKg)} kg (₹{item.soldRevenueInr.toLocaleString("en-IN")})
                         </span>
+                        {avgCostPerKg > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span
+                              className={`tabular-nums font-bold ${
+                                itemProfit >= 0 ? "text-emerald-700" : "text-rose-700"
+                              }`}
+                            >
+                              Munafa {itemProfit >= 0 ? "+" : "-"}₹{Math.abs(itemProfit).toLocaleString("en-IN")}
+                            </span>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
