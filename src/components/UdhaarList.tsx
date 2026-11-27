@@ -173,7 +173,25 @@ export function UdhaarList({
 
   return (
     <div className="space-y-3">
-      {/* Dual Receivable / Payable Summary & + Add Person Action */}
+      {/* Prominent Top Action Button: + Add New Customer / नया ग्राहक जोड़ें */}
+      <button
+        type="button"
+        onClick={() => {
+          setNewName("");
+          setNewMobile("");
+          setNewAddress("");
+          setNewType("RECEIVABLE");
+          setNewOpeningAmt("0");
+          setAddError("");
+          setShowAddModal(true);
+        }}
+        className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-sm sm:text-base font-extrabold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+      >
+        <UserPlus className="w-5 h-5 shrink-0" />
+        <span>+ Add New Customer / नया ग्राहक जोड़ें</span>
+      </button>
+
+      {/* Dual Receivable / Payable Summary */}
       <div className="rounded-2xl bg-slate-900 text-white p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -187,18 +205,6 @@ export function UdhaarList({
               </p>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setShowAddModal(true);
-              setAddError("");
-            }}
-            className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white text-xs sm:text-sm font-extrabold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Person</span>
-          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-2.5">
@@ -233,7 +239,7 @@ export function UdhaarList({
             <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-emerald-700" />
-                <span>Add Person · नया खाता जोड़ें</span>
+                <span>Add New Customer · नया ग्राहक जोड़ें</span>
               </h3>
               <button
                 type="button"
@@ -278,7 +284,7 @@ export function UdhaarList({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Person Name · नाम *
+                  Customer Name · ग्राहक का नाम *
                 </label>
                 <input
                   type="text"
@@ -294,7 +300,7 @@ export function UdhaarList({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Mobile Number (10 digits) · मोबाइल नंबर
+                  10-digit Mobile Number · मोबाइल नंबर
                 </label>
                 <input
                   type="tel"
@@ -324,9 +330,30 @@ export function UdhaarList({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Pending Amount (₹) · बाकी रकम
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Opening Balance (₹0 or custom) · शुरुआती बाकी (₹)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    {["0", "100", "500"].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setNewOpeningAmt(preset);
+                          setAddError("");
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-mono-num font-extrabold border cursor-pointer ${
+                          newOpeningAmt === preset
+                            ? "bg-emerald-600 text-white border-emerald-600"
+                            : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+                        }`}
+                      >
+                        ₹{preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <input
                   type="number"
                   min="0"
@@ -336,7 +363,7 @@ export function UdhaarList({
                     setNewOpeningAmt(e.target.value);
                     setAddError("");
                   }}
-                  placeholder="e.g., 100 (optional)"
+                  placeholder="0"
                   className="w-full min-h-[44px] rounded-xl border-2 border-slate-300 px-3.5 text-sm font-mono-num font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
@@ -351,7 +378,7 @@ export function UdhaarList({
                   className="flex-1 min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Save Person · जोड़ें</span>
+                  <span>Save Customer · ग्राहक जोड़ें</span>
                 </button>
                 <button
                   type="button"
@@ -536,7 +563,7 @@ export function UdhaarList({
           <Users className="w-10 h-10 text-slate-400 mx-auto mb-2" />
           <p className="text-base font-bold text-slate-900">Koi khata darj nahi hai</p>
           <p className="text-sm text-slate-600 mt-1">
-            Upar &ldquo;Add Person&rdquo; dabayein ya bolein: &ldquo;Sunita ji ke 50 rupaye udhaar likho&rdquo;
+            Upar &ldquo;+ Add New Customer / नया ग्राहक जोड़ें&rdquo; dabayein ya bolein: &ldquo;Sunita ji ke 50 rupaye udhaar likho&rdquo;
           </p>
         </div>
       ) : (

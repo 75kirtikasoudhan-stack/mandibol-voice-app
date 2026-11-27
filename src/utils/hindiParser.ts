@@ -642,12 +642,20 @@ function extractCustomerName(raw: string, knownCustomers: string[]): string {
 
   let extractedCandidate = "";
 
-  const latinMatch = raw.match(
-    /^(.+?)\s+(?:mobile|mob|phone|number|address|addr|pata|ne|ke|ka|ki|ko|udhaar|udhar|baaki|baki|jama|kat|kaat|likho|hisab|hisaab|dene|dena)\b/i
+  const cleanedForName = raw
+    .replace(
+      /^(?:aaj|abhi|add\s+new\s+customer|add\s+customer|new\s+customer|naya\s+grahak|grahak|customer|add|naya\s+khata)\s+/i,
+      ""
+    )
+    .replace(/^(?:आज|अभी|नया\s+ग्राहक|ग्राहक|नया\s+खाता)\s+/, "")
+    .trim();
+
+  const latinMatch = cleanedForName.match(
+    /^(.+?)\s+(?:mobile|mob|phone|number|address|addr|pata|ne|ke|ka|ki|ko|udhaar|udhar|baaki|baki|jama|kat|kaat|likho|hisab|hisaab|dene|dena|add|jodo|khata|profile)\b/i
   );
   if (latinMatch && latinMatch[1]) {
     const candidate = latinMatch[1]
-      .replace(/^(aaj|abhi)\s+/i, "")
+      .replace(/^(aaj|abhi|naya|new|grahak|customer|add)\s+/i, "")
       .replace(/\s+(?:mobile|mob|phone|address|pata).*$/i, "")
       .trim();
     if (candidate && !/^\d+$/.test(candidate)) {
@@ -659,14 +667,32 @@ function extractCustomerName(raw: string, knownCustomers: string[]): string {
   }
 
   if (!extractedCandidate) {
-    const devMatch = raw.match(
-      /^(.+?)\s+(?:मोबाइल|पता|ने|के|का|की|को|उधार|बाकी|जमा|काट|लिखो|हिसाब|देने|देना)/
+    const devMatch = cleanedForName.match(
+      /^(.+?)\s+(?:मोबाइल|पता|ने|के|का|की|को|उधार|बाकी|जमा|काट|लिखो|हिसाब|देने|देना|जोड़ो|खाता)/
     );
     if (devMatch && devMatch[1]) {
       const candidate = devMatch[1].trim();
-      if (candidate && !/^(आज|अभी|उधार)$/.test(candidate)) {
+      if (candidate && !/^(आज|अभी|उधार|ग्राहक)$/.test(candidate)) {
         extractedCandidate = candidate;
       }
+    }
+  }
+
+  // Fallback for direct add-customer commands without trailing connector (e.g. "Add new customer Vikram")
+  if (
+    !extractedCandidate &&
+    /^(?:add\s+new\s+customer|add\s+customer|new\s+customer|naya\s+grahak|नया\s+ग्राहक)\s+/i.test(
+      raw
+    )
+  ) {
+    const bareCandidate = cleanedForName
+      .replace(/\s+(?:add\s+karo|karo|jodo|mobile.*|address.*|\d+.*)$/i, "")
+      .trim();
+    if (bareCandidate && !/^\d+$/.test(bareCandidate)) {
+      extractedCandidate = bareCandidate
+        .split(/\s+/)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
     }
   }
 
@@ -976,6 +1002,8 @@ export function parseHindiCommand(
       customer_name: buyerName,
       multi_items: multiLines,
       is_udhaar: isUdhaarWord,
+      ...(mobile ? { mobile } : {}),
+      ...(address ? { address } : {}),
       ...(hasExplicitSplit
         ? {
             paid_online_inr: splitInfo.explicitOnlineInr,
@@ -1134,9 +1162,23 @@ export function parseHindiCommand(
     };
   }
 
-  // 5. Check UDHAAR (new credit entry — also supports mobile & address)
-  if (isUdhaarWord) {
-    if (!detectedCustomer || extractedTotal <= 0) {
+  // 5. Check UDHAAR or explicit Add Customer Profile (supports ₹0 opening balance + mobile & address)
+  const isProfileCreateKeyword =
+    /\b(add\s+(?:new\s+)?customer|new\s+customer|naya\s+grahak|khata\s+kholo|khata\s+banao|add\s+karo|add\s+kardo|jodo|jod\s+do|profile)\b/i.test(
+      cleanedLower
+    ) || /(नया\s*ग्राहक|खाता\s*खोलो|खाता\s*बनाओ|जोड़ो|जोड़\s*दो)/.test(cleanedText);
+
+  const hasContactDetailsWithName =
+    Boolean(detectedCustomer) &&
+    (Boolean(mobile) || Boolean(address)) &&
+    !isPurchase &&
+    !isSale &&
+    !isRepayment &&
+    !isPayableAdd &&
+    !knownItem;
+
+  if (isUdhaarWord || ((isProfileCreateKeyword || hasContactDetailsWithName) && !knownItem)) {
+    if (!detectedCustomer || (extractedTotal <= 0 && !isProfileCreateKeyword && !hasContactDetailsWithName)) {
       return {
         intent: "UNCLEAR",
         suggested_intent: "UDHAAR",
@@ -1158,7 +1200,10 @@ export function parseHindiCommand(
       customer_name: detectedCustomer,
       ...(mobile ? { mobile } : {}),
       ...(address ? { address } : {}),
-      hindi_reply: `जी, ${detectedCustomer} के ${extractedTotal} रुपये उधार खाते में लिख दिए हैं।`,
+      hindi_reply:
+        extractedTotal > 0
+          ? `जी, ${detectedCustomer} के ${extractedTotal} रुपये उधार खाते में लिख दिए हैं।`
+          : `जी, ${detectedCustomer} का नया ग्राहक खाता जोड़ दिया गया है।`,
     };
   }
 
@@ -1233,7 +1278,9 @@ export function parseHindiCommand(
       quantity_kg,
       ...(rate_per_kg > 0 ? { rate_per_kg } : {}),
       amount_inr,
-      customer_name: "",
+      customer_name: detectedCustomer,
+      ...(mobile ? { mobile } : {}),
+      ...(address ? { address } : {}),
       paid_online_inr: resolvedSale.paid_online_inr,
       paid_offline_inr: resolvedSale.paid_offline_inr,
       payment_mode: resolvedSale.payment_mode,

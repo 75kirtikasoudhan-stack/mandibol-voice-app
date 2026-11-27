@@ -19,7 +19,7 @@ interface ShopSetupModalProps {
   shopProfile: ShopProfile;
   onClose: () => void;
   onSaveProfile: (next: ShopProfile) => void;
-  onStartFresh: () => void;
+  onStartFresh: (overrideProfile?: ShopProfile) => void;
   onLoadDemoData: () => void;
 }
 
@@ -68,29 +68,43 @@ export function ShopSetupModal({
 
   const activePreview = getActiveBusinessDateTime(draft);
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
+  const buildValidatedProfile = (): ShopProfile | null => {
     const cleanedShop = draft.shopName.trim() || "MandiBol";
     const cleanedMobile = draft.vendorMobile.replace(/\D/g, "").slice(0, 10);
 
     if (draft.vendorMobile.trim() && cleanedMobile.length !== 10) {
       setFormError("Vendor mobile number 10 anko ka hona chahiye.");
-      return;
+      return null;
     }
 
     if (!draft.useLiveClock && !draft.customDate) {
       setFormError("Kripya custom business date chunein.");
-      return;
+      return null;
     }
 
-    onSaveProfile({
+    return {
       shopName: cleanedShop,
       vendorName: draft.vendorName.trim(),
       vendorMobile: cleanedMobile,
       useLiveClock: draft.useLiveClock,
       customDate: draft.customDate,
       customTime: draft.customTime || "09:00",
-    });
+    };
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const validProfile = buildValidatedProfile();
+    if (!validProfile) return;
+    onSaveProfile(validProfile);
+    onClose();
+  };
+
+  const handleStartFreshFromSetup = () => {
+    const validProfile = buildValidatedProfile();
+    if (!validProfile) return;
+    onStartFresh(validProfile);
+    setConfirmingFresh(false);
     onClose();
   };
 
@@ -268,18 +282,26 @@ export function ShopSetupModal({
             <p className="text-xs font-bold text-rose-700">{formError}</p>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="submit"
-              className="flex-1 min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
+              className="flex-1 min-w-[160px] min-h-[46px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
             >
-              <Check className="w-4 h-4" />
+              <Check className="w-4 h-4 shrink-0" />
               <span>Save Shop Setup · सेव करें</span>
             </button>
             <button
               type="button"
+              onClick={handleStartFreshFromSetup}
+              className="flex-1 min-w-[180px] min-h-[46px] px-3 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-700 hover:to-orange-700 text-white text-xs sm:text-sm font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap shadow-xs cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span>Start Fresh (₹0 नया खाता)</span>
+            </button>
+            <button
+              type="button"
               onClick={onClose}
-              className="min-h-[46px] px-4 rounded-xl border border-slate-300 text-slate-700 text-sm font-bold hover:bg-slate-50 whitespace-nowrap cursor-pointer"
+              className="min-h-[46px] px-3.5 rounded-xl border border-slate-300 text-slate-700 text-xs sm:text-sm font-bold hover:bg-slate-50 whitespace-nowrap cursor-pointer"
             >
               Cancel
             </button>
@@ -316,7 +338,7 @@ export function ShopSetupModal({
                   className="w-full min-h-[44px] px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer"
                 >
                   <Trash2 className="w-4 h-4 shrink-0" />
-                  <span>Start Fresh (₹0)</span>
+                  <span>Start Fresh (₹0 नया खाता)</span>
                 </button>
               ) : (
                 <div className="space-y-1.5">
@@ -327,9 +349,7 @@ export function ShopSetupModal({
                     <button
                       type="button"
                       onClick={() => {
-                        onStartFresh();
-                        setConfirmingFresh(false);
-                        onClose();
+                        handleStartFreshFromSetup();
                       }}
                       className="flex-1 min-h-[44px] px-2.5 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-extrabold whitespace-nowrap cursor-pointer"
                     >

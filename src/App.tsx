@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Settings,
   Sprout,
+  Trash2,
   Users,
   Volume2,
   X,
@@ -644,76 +645,87 @@ export default function App() {
           });
 
           let nextUdhaar = prev.udhaarList;
-          if (pendingBalanceInr > 0) {
+          const hasNamedBuyer =
+            Boolean(parsed.customer_name.trim()) &&
+            parsed.customer_name.trim().toLowerCase() !== "grahak";
+          const billPaymentMode: PaymentMode =
+            paidOnlineInr > 0 && paidOfflineInr > 0
+              ? "SPLIT"
+              : paidOnlineInr > 0
+              ? "ONLINE"
+              : "OFFLINE";
+
+          if (pendingBalanceInr > 0 || hasNamedBuyer) {
             const existingIdx = prev.udhaarList.findIndex(
               (u) => u.customerName.toLowerCase() === buyerName.toLowerCase()
             );
             const noteStr =
-              paidTotal > 0
-                ? `${billNumber}: ${itemsSummary} (Paid ₹${paidOnlineInr} Online, ₹${paidOfflineInr} Cash)`
-                : `${billNumber}: ${itemsSummary}`;
+              pendingBalanceInr > 0
+                ? paidTotal > 0
+                  ? `${billNumber}: ${itemsSummary} (Paid ₹${paidOnlineInr} Online, ₹${paidOfflineInr} Cash)`
+                  : `${billNumber}: ${itemsSummary}`
+                : `${billNumber}: ${itemsSummary} (Bill Paid)`;
+
             if (existingIdx >= 0) {
               const existing = prev.udhaarList[existingIdx];
               const nextBal = existing.amountInr + pendingBalanceInr;
-              const tx: UdhaarTransaction = {
-                id: `u-tx-${Date.now()}`,
-                type: "CREDIT",
-                amountInr: pendingBalanceInr,
-                onlineInr: paidOnlineInr,
-                offlineInr: paidOfflineInr,
-                paymentMode:
-                  paidOnlineInr > 0 && paidOfflineInr > 0
-                    ? "SPLIT"
-                    : paidOnlineInr > 0
-                    ? "ONLINE"
-                    : "OFFLINE",
-                balanceAfter: nextBal,
-                note: noteStr,
-                dateTime,
-              };
+              const shouldLogTx = pendingBalanceInr > 0 || paidTotal > 0;
+              const tx: UdhaarTransaction | null = shouldLogTx
+                ? {
+                    id: `u-tx-${Date.now()}`,
+                    type: pendingBalanceInr > 0 ? "CREDIT" : "REPAYMENT",
+                    amountInr: pendingBalanceInr > 0 ? pendingBalanceInr : paidTotal,
+                    onlineInr: paidOnlineInr,
+                    offlineInr: paidOfflineInr,
+                    paymentMode: billPaymentMode,
+                    balanceAfter: nextBal,
+                    note: noteStr,
+                    dateTime,
+                  }
+                : null;
               nextUdhaar = prev.udhaarList.map((u, i) =>
                 i === existingIdx
                   ? {
                       ...u,
+                      mobile: parsed.mobile?.trim() || u.mobile,
+                      address: parsed.address?.trim() || u.address,
                       amountInr: nextBal,
                       totalPaidOnlineInr:
                         (u.totalPaidOnlineInr ?? 0) + paidOnlineInr,
                       totalPaidOfflineInr:
                         (u.totalPaidOfflineInr ?? 0) + paidOfflineInr,
                       lastUpdated: nowTime,
-                      history: [tx, ...u.history],
+                      history: tx ? [tx, ...u.history] : u.history,
                     }
                   : u
               );
             } else {
-              const tx: UdhaarTransaction = {
-                id: `u-tx-${Date.now()}`,
-                type: "CREDIT",
-                amountInr: pendingBalanceInr,
-                onlineInr: paidOnlineInr,
-                offlineInr: paidOfflineInr,
-                paymentMode:
-                  paidOnlineInr > 0 && paidOfflineInr > 0
-                    ? "SPLIT"
-                    : paidOnlineInr > 0
-                    ? "ONLINE"
-                    : "OFFLINE",
-                balanceAfter: pendingBalanceInr,
-                note: noteStr,
-                dateTime,
-              };
+              const shouldLogTx = pendingBalanceInr > 0 || paidTotal > 0;
+              const tx: UdhaarTransaction | null = shouldLogTx
+                ? {
+                    id: `u-tx-${Date.now()}`,
+                    type: pendingBalanceInr > 0 ? "CREDIT" : "REPAYMENT",
+                    amountInr: pendingBalanceInr > 0 ? pendingBalanceInr : paidTotal,
+                    onlineInr: paidOnlineInr,
+                    offlineInr: paidOfflineInr,
+                    paymentMode: billPaymentMode,
+                    balanceAfter: pendingBalanceInr,
+                    note: noteStr,
+                    dateTime,
+                  }
+                : null;
               nextUdhaar = [
                 {
                   id: `${buyerName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
                   customerName: buyerName,
-                  mobile: "",
-                  address: "",
+                  mobile: parsed.mobile?.trim() || "",
+                  address: parsed.address?.trim() || "",
                   accountType: "RECEIVABLE",
                   amountInr: pendingBalanceInr,
                   totalPaidOnlineInr: paidOnlineInr,
                   totalPaidOfflineInr: paidOfflineInr,
                   lastUpdated: nowTime,
-                  history: [tx],
+                  history: tx ? [tx] : [],
                 },
                 ...prev.udhaarList,
               ];
@@ -958,12 +970,77 @@ export default function App() {
             timestamp: nowTime,
           };
 
+          const spokenCustomer = parsed.customer_name?.trim() || "";
+          const hasSpokenCustomer =
+            Boolean(spokenCustomer) &&
+            !["grahak", "kisan"].includes(spokenCustomer.toLowerCase());
+          let nextUdhaar = prev.udhaarList;
+          if (hasSpokenCustomer) {
+            const existingIdx = prev.udhaarList.findIndex(
+              (u) => u.customerName.toLowerCase() === spokenCustomer.toLowerCase()
+            );
+            const salePayMode: PaymentMode =
+              paidOnline > 0 && paidOffline > 0
+                ? "SPLIT"
+                : paidOnline > 0
+                ? "ONLINE"
+                : "OFFLINE";
+            const saleTx: UdhaarTransaction = {
+              id: `u-tx-${Date.now()}`,
+              type: "REPAYMENT",
+              amountInr: amt,
+              onlineInr: paidOnline,
+              offlineInr: paidOffline,
+              paymentMode: salePayMode,
+              balanceAfter:
+                existingIdx >= 0 ? prev.udhaarList[existingIdx].amountInr : 0,
+              note: `${veg.name} ${kgRounded}kg (${amt > 0 ? `₹${amt} Paid` : "Cash"})`,
+              dateTime: activeDt.dateTimeLabel,
+            };
+            if (existingIdx >= 0) {
+              nextUdhaar = prev.udhaarList.map((u, idx) =>
+                idx === existingIdx
+                  ? {
+                      ...u,
+                      mobile: parsed.mobile?.trim() || u.mobile,
+                      address: parsed.address?.trim() || u.address,
+                      totalPaidOnlineInr: (u.totalPaidOnlineInr ?? 0) + paidOnline,
+                      totalPaidOfflineInr: (u.totalPaidOfflineInr ?? 0) + paidOffline,
+                      lastUpdated: nowTime,
+                      history: [saleTx, ...u.history],
+                    }
+                  : u
+              );
+            } else {
+              const displayName = spokenCustomer
+                .split(/\s+/)
+                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(" ");
+              nextUdhaar = [
+                {
+                  id: `${spokenCustomer.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
+                  customerName: displayName,
+                  mobile: parsed.mobile?.trim() || "",
+                  address: parsed.address?.trim() || "",
+                  accountType: "RECEIVABLE",
+                  amountInr: 0,
+                  totalPaidOnlineInr: paidOnline,
+                  totalPaidOfflineInr: paidOffline,
+                  lastUpdated: nowTime,
+                  history: [saleTx],
+                },
+                ...prev.udhaarList,
+              ];
+            }
+          }
+
           return {
             ...prev,
             totalBikri: prev.totalBikri + amt,
             totalOnlineBikri: (prev.totalOnlineBikri ?? 0) + paidOnline,
             totalOfflineBikri: (prev.totalOfflineBikri ?? 0) + paidOffline,
             stocks: nextStocks,
+            udhaarList: nextUdhaar,
             activities: [activity, ...prev.activities].slice(0, 15),
           };
         });
@@ -990,14 +1067,17 @@ export default function App() {
         );
         const nextBalance = (existingCustomer?.amountInr ?? 0) + amt;
 
-        const tx: UdhaarTransaction = {
-          id: `u-tx-${Date.now()}`,
-          type: "CREDIT",
-          amountInr: amt,
-          balanceAfter: nextBalance,
-          note: rawTranscript,
-          dateTime,
-        };
+        const tx: UdhaarTransaction | null =
+          amt > 0
+            ? {
+                id: `u-tx-${Date.now()}`,
+                type: "CREDIT",
+                amountInr: amt,
+                balanceAfter: nextBalance,
+                note: rawTranscript,
+                dateTime,
+              }
+            : null;
 
         const targetId =
           existingCustomer?.id ??
@@ -1026,7 +1106,7 @@ export default function App() {
                     address: parsed.address?.trim() || u.address,
                     amountInr: u.amountInr + amt,
                     lastUpdated: nowTime,
-                    history: [tx, ...u.history],
+                    history: tx ? [tx, ...u.history] : u.history,
                   }
                 : u
             );
@@ -1039,16 +1119,21 @@ export default function App() {
                 address: nextAddress,
                 accountType: isPayable ? "PAYABLE" : "RECEIVABLE",
                 amountInr: amt,
+                totalPaidOnlineInr: 0,
+                totalPaidOfflineInr: 0,
                 lastUpdated: nowTime,
-                history: [tx],
+                history: tx ? [tx] : [],
               },
               ...prev.udhaarList,
             ];
           }
 
-          const headline = isPayable
-            ? `Payable · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
-            : `Udhaar · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`;
+          const headline =
+            amt > 0
+              ? isPayable
+                ? `Payable · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
+                : `Udhaar · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
+              : `Customer Added · ${displayCustomer} (₹0)`;
           const activity: ActivityEntry = {
             id: `act-${Date.now()}`,
             intent: parsed.intent,
@@ -1068,9 +1153,12 @@ export default function App() {
         setActiveTab("udhaar");
         setExpandedUdhaarId(targetId);
         setUnclearState(null);
-        const headline = isPayable
-          ? `Payable (Dena Hai) · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
-          : `Udhaar (Lena Hai) · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`;
+        const headline =
+          amt > 0
+            ? isPayable
+              ? `Payable (Dena Hai) · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
+              : `Udhaar (Lena Hai) · ${displayCustomer} +₹${amt.toLocaleString("en-IN")}`
+            : `Customer Profile Added · ${displayCustomer} (₹0)`;
         setConfirmation({
           intent: parsed.intent,
           headline,
@@ -1087,13 +1175,13 @@ export default function App() {
           (u) => u.customerName.toLowerCase() === rawCustomer.toLowerCase()
         );
 
-        if (!existingCustomer) {
-          const notFoundReply = `${rawCustomer || "व्यक्ति"} का कोई खाता नहीं मिला।`;
+        if (!rawCustomer) {
+          const notFoundReply = "व्यक्ति का नाम समझ नहीं आया। कृपया दोबारा बोलें।";
           setActiveTab("udhaar");
           setUnclearState(null);
           setConfirmation({
             intent: parsed.intent,
-            headline: `${isPayable ? "Payable" : "Udhaar"} · ${rawCustomer} not found`,
+            headline: `${isPayable ? "Payable" : "Udhaar"} · Name unclear`,
             hindiReply: notFoundReply,
           });
           speakHindi(notFoundReply);
@@ -1106,7 +1194,7 @@ export default function App() {
         let offlinePaid = 0;
 
         if (parsed.full_repayment) {
-          const fullAmt = existingCustomer.amountInr;
+          const fullAmt = existingCustomer?.amountInr ?? 0;
           if (parsed.payment_mode === "ONLINE") {
             onlinePaid = fullAmt;
           } else {
@@ -1125,6 +1213,88 @@ export default function App() {
         }
 
         const settledAmt = onlinePaid + offlinePaid;
+
+        // Auto-create customer profile if this new name was spoken in a repayment/advance command
+        if (!existingCustomer) {
+          const displayCustomer = rawCustomer
+            .split(/\s+/)
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ");
+          const newId = `${rawCustomer.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`;
+          const dateTime = activeDt.dateTimeLabel;
+          const paymentMode: PaymentMode =
+            onlinePaid > 0 && offlinePaid > 0
+              ? "SPLIT"
+              : onlinePaid > 0
+              ? "ONLINE"
+              : "OFFLINE";
+          const tx: UdhaarTransaction | null =
+            settledAmt > 0
+              ? {
+                  id: `u-tx-${Date.now()}`,
+                  type: "REPAYMENT",
+                  amountInr: settledAmt,
+                  onlineInr: onlinePaid,
+                  offlineInr: offlinePaid,
+                  paymentMode,
+                  balanceAfter: 0,
+                  note: rawTranscript,
+                  dateTime,
+                }
+              : null;
+          const newProfile: UdhaarEntry = {
+            id: newId,
+            customerName: displayCustomer,
+            mobile: parsed.mobile?.trim() || "",
+            address: parsed.address?.trim() || "",
+            accountType: isPayable ? "PAYABLE" : "RECEIVABLE",
+            amountInr: 0,
+            totalPaidOnlineInr: onlinePaid,
+            totalPaidOfflineInr: offlinePaid,
+            lastUpdated: nowTime,
+            history: tx ? [tx] : [],
+          };
+          const hindiReply =
+            settledAmt > 0
+              ? `जी, ${displayCustomer} का नया खाता जोड़कर ${settledAmt} रुपये जमा कर दिए गए हैं।`
+              : `जी, ${displayCustomer} का नया खाता ₹0 बैलेंस के साथ जोड़ दिया गया है।`;
+          const headline =
+            settledAmt > 0
+              ? `New Profile & Jama · ${displayCustomer} +₹${settledAmt.toLocaleString("en-IN")}`
+              : `Customer Profile Added · ${displayCustomer} (₹0)`;
+          const activity: ActivityEntry = {
+            id: `act-${Date.now()}`,
+            intent: parsed.intent,
+            transcript: rawTranscript,
+            summaryText: headline,
+            hindiReply,
+            timestamp: nowTime,
+          };
+
+          setState((prev) => ({
+            ...prev,
+            totalBikri: isPayable ? prev.totalBikri : prev.totalBikri + settledAmt,
+            totalOnlineBikri: isPayable
+              ? prev.totalOnlineBikri
+              : (prev.totalOnlineBikri ?? 0) + onlinePaid,
+            totalOfflineBikri: isPayable
+              ? prev.totalOfflineBikri
+              : (prev.totalOfflineBikri ?? 0) + offlinePaid,
+            udhaarList: [newProfile, ...prev.udhaarList],
+            activities: [activity, ...prev.activities].slice(0, 15),
+          }));
+
+          setActiveTab("udhaar");
+          setExpandedUdhaarId(newId);
+          setUnclearState(null);
+          setConfirmation({
+            intent: parsed.intent,
+            headline,
+            hindiReply,
+          });
+          speakHindi(hindiReply);
+          return;
+        }
 
         if (settledAmt <= 0) {
           const zeroReply = `${existingCustomer.customerName} का पहले से कोई बकाया नहीं है।`;
@@ -1932,7 +2102,7 @@ export default function App() {
     });
   };
 
-  const handleStartFresh = () => {
+  const handleStartFresh = (overrideProfile?: ShopProfile) => {
     recognitionRef.current?.abort();
     stopSpeaking();
     setIsListening(false);
@@ -1942,7 +2112,8 @@ export default function App() {
     setUnclearState(null);
     setActiveTab("stock");
     setExpandedUdhaarId(null);
-    const fresh = createEmptyFreshState(state.shopProfile);
+    const preservedProfile = overrideProfile ?? state.shopProfile;
+    const fresh = createEmptyFreshState(preservedProfile);
     setState(fresh);
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
@@ -2021,8 +2192,19 @@ export default function App() {
               onClick={() => setShowShopSetup(true)}
               className="min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 active:scale-[0.98] border border-emerald-200 text-emerald-950 text-xs sm:text-sm font-extrabold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Settings className="w-4 h-4 text-emerald-700" />
-              <span>Shop Setup</span>
+              <Settings className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span className="hidden sm:inline">Shop Setup</span>
+              <span className="sm:hidden">Setup</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleStartFresh()}
+              className="min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-700 hover:to-orange-700 active:scale-[0.98] text-white text-xs sm:text-sm font-extrabold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 shadow-xs cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span className="hidden md:inline">Start Fresh (₹0 नया खाता)</span>
+              <span className="md:hidden">₹0 नया खाता</span>
             </button>
 
             <button
@@ -2030,7 +2212,7 @@ export default function App() {
               onClick={handleResetDemo}
               className="min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.98] border border-slate-200 text-slate-800 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Reset Demo</span>
               <span className="sm:hidden">Reset</span>
             </button>
